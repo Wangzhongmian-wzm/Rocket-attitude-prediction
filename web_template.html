@@ -1,0 +1,2284 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="根据释放高度和风速，预测降落伞的漂移距离，并显示 95% 范围和落点示意图。">
+<title>漂移距离预测器</title>
+<style>
+  :root {
+    color-scheme: light;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, monospace;
+    --page: #f6f6f3;
+    --surface: #fcfcfb;
+    --surface-2: #f1f0ec;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series: #2a78d6;
+    --series-2: #eb6834;
+    --good: #0ca30c;
+    --good-ink: #006300;
+    --warning: #fab219;
+    --warning-ink: #825400;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --info-bg: #eaf2fb;
+    --good-bg: #eaf6ef;
+    --warn-bg: #fff6e2;
+    --serious-bg: #fdeee7;
+    --measured-bg: rgba(12, 163, 12, 0.06);
+    --extrap-bg: rgba(236, 131, 90, 0.08);
+    --track: #e7e6df;
+    --shadow: 0 1px 2px rgba(11, 11, 11, 0.04), 0 10px 30px rgba(11, 11, 11, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --surface-2: #232322;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series: #3987e5;
+      --series-2: #d95926;
+      --good: #0ca30c;
+      --good-ink: #0ca30c;
+      --warning: #fab219;
+      --warning-ink: #fab219;
+      --serious: #ec835a;
+      --critical: #d03b3b;
+      --info-bg: rgba(57, 135, 229, 0.15);
+      --good-bg: rgba(12, 163, 12, 0.14);
+      --warn-bg: rgba(250, 178, 25, 0.12);
+      --serious-bg: rgba(236, 131, 90, 0.14);
+      --measured-bg: rgba(12, 163, 12, 0.07);
+      --extrap-bg: rgba(236, 131, 90, 0.08);
+      --track: #2c2c2a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.40), 0 10px 30px rgba(0, 0, 0, 0.30);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series: #3987e5;
+    --series-2: #d95926;
+    --good: #0ca30c;
+    --good-ink: #0ca30c;
+    --warning: #fab219;
+    --warning-ink: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --info-bg: rgba(57, 135, 229, 0.15);
+    --good-bg: rgba(12, 163, 12, 0.14);
+    --warn-bg: rgba(250, 178, 25, 0.12);
+    --serious-bg: rgba(236, 131, 90, 0.14);
+    --measured-bg: rgba(12, 163, 12, 0.12);
+    --extrap-bg: rgba(236, 131, 90, 0.12);
+    --track: #2c2c2a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.40), 0 10px 30px rgba(0, 0, 0, 0.30);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--series); text-underline-offset: 3px; }
+  :focus-visible { outline: 3px solid var(--series); outline-offset: 2px; }
+  .sr-only {
+    position: absolute !important;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
+  .skip-link {
+    position: absolute; left: -9999px; top: 10px;
+    background: var(--series); color: #fff;
+    padding: 8px 12px; border-radius: 8px; z-index: 100;
+  }
+  .skip-link:focus { left: 16px; }
+
+  .page-header {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 28px 24px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 14px; flex: 1 1 auto; min-width: 0; }
+  .brand > div { min-width: 0; }
+  .brand-icon {
+    width: 52px; height: 52px; flex: none;
+    border-radius: 16px;
+    background: var(--info-bg);
+    color: var(--series);
+    display: grid; place-items: center;
+  }
+  .brand-icon svg { width: 30px; height: 30px; }
+  h1 {
+    margin: 0;
+    font-size: 28px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+  .subtitle { margin: 4px 0 0; color: var(--ink-2); font-size: 14.5px; overflow-wrap: anywhere; }
+  .theme-toggle {
+    width: 44px; height: 44px; flex: 0 0 auto;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-2);
+    display: grid; place-items: center;
+    box-shadow: var(--shadow);
+  }
+  .theme-toggle:hover { border-color: var(--series); color: var(--series); }
+  .theme-toggle svg { width: 20px; height: 20px; }
+  .header-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+
+  .mode-toggle {
+    height: 44px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-2);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--shadow);
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .mode-toggle svg { width: 19px; height: 19px; }
+  .mode-toggle:hover { border-color: var(--series); color: var(--series); }
+  .mode-toggle.active { background: var(--series); border-color: var(--series); color: #fff; }
+  .mode-count {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--info-bg);
+    color: var(--series);
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-grid;
+    place-items: center;
+  }
+  .mode-toggle.active .mode-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+  .mode-count[hidden] { display: none; }
+
+  main {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 10px 24px 56px;
+    display: grid;
+    gap: 20px;
+    min-width: 0;
+  }
+  main > * { min-width: 0; }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+    min-width: 0;
+  }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .panel-head h2 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+  .muted { color: var(--muted); font-size: 13px; }
+
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr);
+    gap: 20px;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  .control-group { padding: 14px 0 18px; border-top: 1px solid var(--border); }
+  .control-group:first-of-type { border-top: 0; padding-top: 0; }
+  .control-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+  .control-label .unit { color: var(--muted); font-weight: 400; font-size: 13px; }
+  .value-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+  .number-input {
+    width: 124px; height: 48px;
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 21px;
+    font-weight: 700;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    padding: 0 6px;
+  }
+  .number-input:hover { border-color: var(--axis); }
+  .number-input:focus { border-color: var(--series); outline: none; box-shadow: 0 0 0 3px rgba(42, 120, 214, 0.18); }
+  .hint { color: var(--muted); font-size: 13px; }
+
+  input[type="range"] {
+    --pct: 50%;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 44px;
+    background: transparent;
+    margin: 0;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 8px;
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--series) 0 var(--pct), var(--track) var(--pct) 100%);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 28px; height: 28px;
+    margin-top: -10px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 3px solid var(--series);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+  input[type="range"]::-moz-range-track {
+    height: 8px; border-radius: 999px; background: var(--track);
+  }
+  input[type="range"]::-moz-range-progress {
+    height: 8px; border-radius: 999px; background: var(--series);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--surface); border: 3px solid var(--series);
+  }
+  .range-labels {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 11.5px;
+    margin-top: -2px;
+  }
+  .range-labels span:nth-child(2) { color: var(--ink-2); }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .presets button {
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: 12.5px;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .presets button:hover { border-color: var(--series); color: var(--series); }
+  .presets button.active {
+    background: var(--info-bg);
+    border-color: var(--series);
+    color: var(--series);
+    font-weight: 600;
+  }
+  .reset-btn {
+    height: 34px; padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink-2);
+    font-size: 12.5px;
+  }
+  .reset-btn:hover { border-color: var(--series); color: var(--series); }
+
+  .status-box {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    border: 1px solid transparent;
+  }
+  .status-box > div { min-width: 0; overflow-wrap: anywhere; }
+  .status-box svg { width: 18px; height: 18px; flex: none; margin-top: 2px; }
+  .status-box strong { font-weight: 700; }
+  .status-box span { color: var(--ink-2); }
+  .status-good { background: var(--good-bg); border-color: rgba(12, 163, 12, 0.28); color: var(--good-ink); }
+  .status-info { background: var(--info-bg); border-color: rgba(42, 120, 214, 0.22); color: var(--series); }
+  .status-warn { background: var(--warn-bg); border-color: rgba(250, 178, 25, 0.40); color: var(--warning-ink); }
+  .status-serious { background: var(--serious-bg); border-color: rgba(236, 131, 90, 0.40); color: var(--serious); }
+
+  .result { display: flex; flex-direction: column; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge.good { background: var(--good-bg); color: var(--good-ink); }
+  .badge.info { background: var(--info-bg); color: var(--series); }
+  .badge.warn { background: var(--warn-bg); color: var(--warning-ink); }
+  .badge.serious { background: var(--serious-bg); color: var(--serious); }
+
+  .hero-number { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 2px; }
+  .hero-number .value {
+    font-size: 66px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+  .hero-number .unit { font-size: 22px; font-weight: 600; color: var(--ink-2); }
+  .result-lead { margin: 6px 0 8px; color: var(--ink-2); font-size: 14.5px; }
+  .result-lead strong { color: var(--ink); font-weight: 700; }
+  .model-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12.5px;
+    margin: 0 0 14px;
+  }
+  .model-state.calibrated { color: var(--series); }
+  .model-state .dot { width: 8px; height: 8px; flex: none; }
+
+  .range-card {
+    background: var(--surface-2);
+    border-radius: 14px;
+    padding: 14px 16px 14px;
+  }
+  .range-label { font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+  .range-value { font-size: 20px; font-weight: 700; margin: 2px 0 10px; font-variant-numeric: tabular-nums; }
+  .range-track { position: relative; height: 12px; border-radius: 999px; background: var(--track); }
+  .range-fill { position: absolute; top: 0; bottom: 0; border-radius: 999px; background: var(--series); opacity: 0.28; }
+  .range-marker {
+    position: absolute; top: 50%; width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--series);
+    border: 2px solid var(--surface);
+    transform: translate(-50%, -50%);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+  .range-ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; margin-top: 6px; }
+  .range-note { margin: 8px 0 0; color: var(--ink-2); font-size: 12.5px; }
+
+  .result-tip {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin: 14px 0 0;
+    color: var(--ink-2);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .result-tip svg { width: 16px; height: 16px; color: var(--series); flex: none; margin-top: 2px; }
+  .result-tip strong { color: var(--ink); font-weight: 700; }
+
+  .mini-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: auto; padding-top: 16px; }
+  .mini-stats div { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+  .mini-stats span { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+  .mini-stats strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+
+  .chart-svg { position: relative; width: 100%; min-width: 0; }
+  .chart-svg svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart-caption { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; }
+
+  .charts-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; min-width: 0; }
+  .chart-panel { min-width: 0; }
+  .chart-tooltip {
+    position: absolute;
+    z-index: 5;
+    display: none;
+    pointer-events: none;
+    min-width: 118px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .chart-tooltip .tip-title { color: var(--ink-2); font-size: 11.5px; }
+  .chart-tooltip .tip-value { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .chart-tooltip .tip-range { color: var(--muted); font-size: 11px; }
+
+  .chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-top: 4px;
+    color: var(--ink-2);
+    font-size: 11.5px;
+  }
+  .chart-legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .legend-line { display: inline-block; width: 18px; height: 2px; border-radius: 2px; background: var(--series); }
+  .legend-band { display: inline-block; width: 18px; height: 10px; border-radius: 3px; background: var(--series); opacity: 0.16; }
+  .legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+  .legend-swatch.measured { background: var(--measured-bg); border: 1px solid rgba(12, 163, 12, 0.30); }
+  .legend-swatch.extrap { background: var(--extrap-bg); border: 1px solid rgba(236, 131, 90, 0.35); }
+
+  .data-table { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .data-table summary {
+    cursor: pointer;
+    color: var(--ink-2);
+    font-size: 13px;
+    font-weight: 600;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .data-table summary::-webkit-details-marker { display: none; }
+  .data-table summary::before { content: "▸"; color: var(--muted); transition: transform 0.15s; }
+  .data-table[open] summary::before { transform: rotate(90deg); }
+  .data-table table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; }
+  .data-table th, .data-table td {
+    padding: 6px 8px;
+    text-align: right;
+    border-bottom: 1px solid var(--grid);
+    font-variant-numeric: tabular-nums;
+  }
+  .data-table th:first-child, .data-table td:first-child { text-align: left; }
+  .data-table th { color: var(--muted); font-weight: 600; font-size: 11.5px; }
+  .data-table tr.current td { background: var(--info-bg); font-weight: 600; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+  .dot.good { background: var(--good); }
+  .dot.info { background: var(--series); }
+  .dot.warn { background: var(--serious); }
+
+  .training-panel { border-color: rgba(42, 120, 214, 0.28); }
+  .training-intro {
+    margin: 0 0 16px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    max-width: 92ch;
+  }
+  .training-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.2fr auto;
+    gap: 12px;
+    align-items: end;
+  }
+  .train-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .train-field label { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .train-input {
+    width: 100%;
+    height: 44px;
+    border: 1.5px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 0 12px;
+    font-size: 16px;
+    font-variant-numeric: tabular-nums;
+  }
+  .train-input:hover { border-color: var(--axis); }
+  .train-input:focus { border-color: var(--series); outline: none; box-shadow: 0 0 0 3px rgba(42, 120, 214, 0.18); }
+  .train-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .primary-btn {
+    height: 44px;
+    padding: 0 16px;
+    border-radius: 11px;
+    border: 1px solid var(--series);
+    background: var(--series);
+    color: #fff;
+    font-weight: 700;
+    font-size: 13.5px;
+  }
+  .primary-btn:hover { filter: brightness(1.06); }
+  .ghost-btn {
+    height: 44px;
+    padding: 0 14px;
+    border-radius: 11px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-2);
+    font-size: 13px;
+  }
+  .ghost-btn:hover { border-color: var(--series); color: var(--series); }
+  .danger-btn {
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 11px;
+    border: 1px solid rgba(208, 59, 59, 0.35);
+    background: transparent;
+    color: var(--critical);
+    font-size: 13px;
+  }
+  .danger-btn:hover { background: rgba(208, 59, 59, 0.08); }
+
+  .training-message {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    border: 1px solid transparent;
+  }
+  .training-message.ok { background: var(--good-bg); color: var(--good-ink); border-color: rgba(12, 163, 12, 0.28); }
+  .training-message.warn { background: var(--warn-bg); color: var(--warning-ink); border-color: rgba(250, 178, 25, 0.40); }
+  .training-message.err { background: var(--serious-bg); color: var(--serious); border-color: rgba(236, 131, 90, 0.40); }
+
+  .training-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 16px;
+    margin-top: 16px;
+    align-items: start;
+  }
+  .training-summary { background: var(--surface-2); border-radius: 14px; padding: 14px; min-width: 0; }
+  .training-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .train-stat span { display: block; color: var(--muted); font-size: 11.5px; }
+  .train-stat strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .training-loo {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--surface);
+    font-size: 12.5px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+  .training-loo strong { color: var(--ink); }
+  .ok-text { color: var(--good-ink); font-weight: 700; }
+  .warn-text { color: var(--warning-ink); font-weight: 700; }
+  .training-summary details { margin-top: 8px; font-size: 11.5px; }
+  .training-summary details summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
+  .training-summary details p { margin: 6px 0 0; color: var(--ink-2); font-size: 11.5px; line-height: 1.5; }
+  .reliability { margin-top: 10px; }
+  .reliability-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+  .reliability-track { height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .reliability-fill { height: 100%; border-radius: 999px; background: var(--series); }
+  .reliability-fill.warn { background: var(--warning); }
+  .reliability-fill.serious { background: var(--serious); }
+
+  .training-data { min-width: 0; }
+  .training-data-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .training-data-head h3 { margin: 0; font-size: 14px; }
+  .training-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+  .training-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 560px; }
+  .training-table th, .training-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--grid);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .training-table th:first-child, .training-table td:first-child { text-align: left; }
+  .training-table th { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 600; }
+  .training-table tr:last-child td { border-bottom: 0; }
+  .training-table-note { margin: 0; padding: 9px 10px 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+  .delete-btn {
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--critical);
+    font-size: 11.5px;
+  }
+  .delete-btn:hover { background: rgba(208, 59, 59, 0.08); }
+  .training-empty { padding: 22px 16px; text-align: center; color: var(--muted); font-size: 12.5px; }
+  .training-footer { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  .training-footer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .solidified-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 10px;
+    color: var(--good-ink);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .training-details { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .training-details summary { cursor: pointer; font-weight: 600; color: var(--ink-2); font-size: 13px; }
+  .training-details p { color: var(--ink-2); font-size: 12.5px; max-width: 92ch; }
+  .advanced { margin-top: 10px; background: var(--surface-2); border-radius: 12px; padding: 12px 14px; }
+  .advanced label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+  .advanced output { color: var(--series); font-variant-numeric: tabular-nums; }
+  .advanced input[type="range"] { margin: 4px 0; }
+  .advanced .muted { margin: 0; }
+
+  .explain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .explain-card { background: var(--surface-2); border-radius: 14px; padding: 16px; }
+  .explain-icon {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    margin-bottom: 10px;
+    font-weight: 800;
+    font-size: 16px;
+  }
+  .explain-icon.good { background: var(--good-bg); color: var(--good-ink); }
+  .explain-icon.info { background: var(--info-bg); color: var(--series); }
+  .explain-icon.warn { background: var(--warn-bg); color: var(--warning-ink); }
+  .explain-card h3 { margin: 0 0 4px; font-size: 14.5px; }
+  .explain-card p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+
+  .notes-panel p { color: var(--ink-2); font-size: 13.5px; max-width: 88ch; margin: 0 0 8px; }
+  .notes-panel details { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .notes-panel summary { cursor: pointer; font-weight: 600; color: var(--ink-2); font-size: 13px; }
+  .formula {
+    background: var(--surface-2);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    overflow-x: auto;
+    color: var(--ink);
+    margin: 8px 0;
+  }
+  .faq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+  .faq-item { background: var(--surface-2); border-radius: 12px; padding: 12px 14px; }
+  .faq-item h3 { margin: 0 0 4px; font-size: 13.5px; }
+  .faq-item p { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+
+  footer {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 24px 40px;
+    color: var(--muted);
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  footer a { color: var(--ink-2); }
+
+  @media (max-width: 980px) {
+    .hero-grid, .charts-grid { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .faq-grid { grid-template-columns: 1fr; }
+    .training-form { grid-template-columns: 1fr 1fr; }
+    .train-actions { grid-column: 1 / -1; }
+    .training-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .page-header { padding: 20px 16px 6px; gap: 10px; }
+    main { padding: 8px 16px 40px; }
+    .panel { padding: 16px; border-radius: 16px; }
+    h1 { font-size: 23px; }
+    .subtitle { font-size: 13px; }
+    .brand-icon { width: 44px; height: 44px; border-radius: 13px; }
+    .brand-icon svg { width: 26px; height: 26px; }
+    .hero-number .value { font-size: 52px; }
+    .mini-stats { grid-template-columns: 1fr; }
+    .presets { gap: 6px; }
+    .presets button { padding: 0 10px; font-size: 12px; }
+    .range-labels span:nth-child(2) { display: none; }
+    .header-actions { gap: 8px; }
+    .mode-toggle { width: 44px; padding: 0; justify-content: center; position: relative; gap: 0; }
+    .mode-label { display: none; }
+    .mode-toggle .mode-count { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; font-size: 10px; }
+    .training-form { grid-template-columns: 1fr; }
+    .train-actions { grid-column: auto; }
+    .training-stat-grid { grid-template-columns: 1fr 1fr; }
+    .training-footer { flex-direction: column; }
+    .training-footer-actions { flex-direction: column; width: 100%; }
+    .training-footer button { width: 100%; }
+    .training-table { min-width: 0; font-size: 11px; }
+    .training-table th, .training-table td { padding: 6px 5px; }
+    .training-table .col-base { display: none; }
+    footer { padding: 0 16px 32px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<header class="page-header">
+  <div class="brand">
+    <div class="brand-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 10c2.5-4 5.5-6 9-6s6.5 2 9 6c-3 .8-6 1.2-9 1.2S6 10.8 3 10Z"/>
+        <path d="M5 9.5 9 17M19 9.5 15 17M12 9v8"/>
+        <circle cx="12" cy="19" r="1.8"/>
+      </svg>
+    </div>
+    <div>
+      <h1>漂移距离预测器</h1>
+      <p class="subtitle">直接输入高度和风速，马上看到伞大概会飘多远。</p>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="mode-toggle" id="trainingToggle" type="button" aria-pressed="false" aria-controls="trainingPanel" aria-label="打开训练模式" title="训练模式">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 3h6M10 3v5.2L4.6 18a2 2 0 0 0 1.7 3h11.4a2 2 0 0 0 1.7-3L15 8.2V3"/>
+        <path d="M7.3 14h9.4M8.5 17h7"/>
+      </svg>
+      <span class="mode-label">训练模式</span>
+      <span class="mode-count" id="trainingCount" hidden>0</span>
+    </button>
+    <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换到深色模式">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <p class="sr-only" id="liveResult" aria-live="polite"></p>
+
+  <section class="hero-grid" aria-label="设置与预测结果">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>1. 设置条件</h2>
+        <button class="reset-btn" id="resetBtn" type="button">重置</button>
+      </div>
+
+      <div class="control-group">
+        <div class="control-label" id="heightLabel">
+          <span>释放高度</span>
+          <span class="unit">米 (m)</span>
+        </div>
+        <div class="value-row">
+          <input class="number-input" id="heightNumber" type="number" min="0.1" step="0.05" value="10" inputmode="decimal" aria-labelledby="heightLabel">
+          <span class="hint" id="heightHint">约 3 层楼高</span>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-label" id="windLabel">
+          <span>风速</span>
+          <span class="unit">米 / 秒 (m/s)</span>
+        </div>
+        <div class="value-row">
+          <input class="number-input" id="windNumber" type="number" min="0" step="0.1" value="2.0" inputmode="decimal" aria-labelledby="windLabel">
+          <span class="hint" id="windHint">轻风</span>
+        </div>
+      </div>
+
+      <div class="status-box status-good" id="statusBox">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+        <div><strong>这个高度和风速都有实测数据作支撑。</strong><br><span>高度 10 m 是内插，风速 2.0 m/s 在实测范围内。</span></div>
+      </div>
+    </div>
+
+    <div class="panel result">
+      <div class="panel-head">
+        <h2>2. 预测结果</h2>
+        <span class="badge info" id="statusBadge">高度内插</span>
+      </div>
+      <div class="hero-number">
+        <span class="value" id="driftValue">—</span>
+        <span class="unit">米</span>
+      </div>
+      <p class="result-lead">预计落在释放点下风向约 <strong id="driftInline">—</strong> 米处。</p>
+      <div class="model-state" id="modelState"><span class="dot good" aria-hidden="true"></span><span>基础模型</span></div>
+
+      <div class="range-card">
+        <div class="range-label">单次抛掷的 95% 范围</div>
+        <div class="range-value" id="rangeValue">—</div>
+        <div class="range-track" aria-hidden="true">
+          <div class="range-fill" id="rangeFill"></div>
+          <div class="range-marker" id="rangeMarker"></div>
+        </div>
+        <div class="range-ends"><span>0 m</span><span id="rangeMax">10 m</span></div>
+        <p class="range-note">意思是：大多数情况下会落在这个范围内，不是保证。</p>
+      </div>
+
+      <div class="result-tip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+        <span>这是<strong>单次抛掷</strong>的估计值。要留安全余量，请参考 95% 范围的上限。</span>
+      </div>
+
+      <div class="mini-stats">
+        <div><span>留空时间</span><strong id="hangTime">—</strong></div>
+        <div><span>风速 +1 m/s 多飘</span><strong id="kValue">—</strong></div>
+        <div><span>零风速偏移</span><strong id="bValue">—</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel training-panel" id="trainingPanel" hidden aria-labelledby="trainingTitle">
+    <div class="panel-head">
+      <h2 id="trainingTitle">训练模式：用新数据校准</h2>
+      <span class="badge info" id="trainingBadge">原始模型</span>
+    </div>
+    <p class="training-intro">把你实际测到的落点填进来。模型不会从头重训，而是在原模型上学习“整体偏移、高度趋势、风速趋势”。样本少时只轻微调整；样本多时才明显改变。高度和风速不设硬上限，但偏离实测范围越远，误差越大。</p>
+
+    <form class="training-form" id="trainingForm" novalidate>
+      <div class="train-field">
+        <label for="trainHeight">释放高度 (m)</label>
+        <input class="train-input" id="trainHeight" type="number" min="0.1" step="0.05" value="10" inputmode="decimal">
+      </div>
+      <div class="train-field">
+        <label for="trainWind">风速 (m/s)</label>
+        <input class="train-input" id="trainWind" type="number" min="0" step="0.1" value="2" inputmode="decimal">
+      </div>
+      <div class="train-field">
+        <label for="trainDrift">实测漂移距离 (m)</label>
+        <input class="train-input" id="trainDrift" type="number" min="0" step="0.1" placeholder="例如 7.8" inputmode="decimal">
+      </div>
+      <div class="train-actions">
+        <button class="primary-btn" type="submit">添加这条数据</button>
+        <button class="ghost-btn" type="button" id="fillCurrentBtn">填入当前条件</button>
+      </div>
+    </form>
+    <div class="training-message" id="trainingMessage" role="status" hidden></div>
+
+    <div class="training-grid">
+      <div class="training-summary" id="trainingSummary"></div>
+      <div class="training-data">
+        <div class="training-data-head">
+          <h3>已录入的数据</h3>
+          <span class="muted" id="trainingDataHint">只保存在本机浏览器</span>
+        </div>
+        <div class="training-table-wrap" id="trainingTable"></div>
+      </div>
+    </div>
+
+    <div class="training-footer">
+      <button class="danger-btn" id="resetTrainingBtn" type="button">恢复原始模型</button>
+      <div class="training-footer-actions">
+        <button class="ghost-btn" id="downloadModelBtn" type="button">下载固化模型 JSON</button>
+        <button class="ghost-btn" id="exportTrainingBtn" type="button">导出数据 CSV</button>
+      </div>
+    </div>
+
+    <details class="training-details">
+      <summary>训练模式是怎么更新的？</summary>
+      <p>模型把新增数据当作“现场校准”证据，估计三个修正量：整体偏移、随高度变化的趋势、随风速变化的趋势。修正量带有先验，样本少时会收缩；拟合使用 Huber 稳健权重，异常点不会把模型带偏太多。</p>
+      <p class="formula">d校准 = d基础 + c0 + c1·(h−10)/10 + c2·(v−2)/2</p>
+      <p>新增数据只保存在你的浏览器里，不会上传。换电脑、清缓存或换浏览器后会丢失。原来的 25 个训练点来自另一套装置；如果你现在测的是不同装置，原数据指标变差是正常的，说明模型正在适应当前装置。</p>
+      <p class="muted">每次添加或删除数据后，网页会自动把校准结果固化到本机浏览器；下次打开会直接使用固化后的模型，不需要重新训练。</p>
+    </details>
+  </section>
+
+  <section class="panel" aria-labelledby="diagramTitle">
+    <div class="panel-head">
+      <h2 id="diagramTitle">落点示意（俯视）</h2>
+      <span class="muted">风从左吹向右边的下风向</span>
+    </div>
+    <div id="landingDiagram" class="chart-svg"></div>
+    <p class="chart-caption">从释放点到预计落点的水平距离；浅色带是单次抛掷的 95% 范围。</p>
+  </section>
+
+  <section class="charts-grid" aria-label="趋势图">
+    <div class="panel chart-panel">
+      <div class="panel-head">
+        <h2>风速越大，飘得越远</h2>
+        <span class="muted" id="windChartSub">当前高度 10 m</span>
+      </div>
+      <div id="windChart" class="chart-svg"></div>
+      <div class="chart-legend" aria-label="图例">
+        <span><i class="legend-line" aria-hidden="true"></i>预测值</span>
+        <span><i class="legend-band" aria-hidden="true"></i>95% 范围</span>
+        <span><i class="legend-swatch measured" aria-hidden="true"></i>实测风速范围</span>
+        <span><i class="legend-swatch extrap" aria-hidden="true"></i>外推</span>
+      </div>
+      <details class="data-table">
+        <summary>看数字表</summary>
+        <div id="windTable"></div>
+      </details>
+    </div>
+
+    <div class="panel chart-panel">
+      <div class="panel-head">
+        <h2>放得越高，飘得越远</h2>
+        <span class="muted" id="heightChartSub">当前风速 2.0 m/s</span>
+      </div>
+      <div id="heightChart" class="chart-svg"></div>
+      <div class="chart-legend" aria-label="图例">
+        <span><i class="legend-line" aria-hidden="true"></i>预测值</span>
+        <span><i class="legend-band" aria-hidden="true"></i>95% 范围</span>
+        <span><i class="legend-swatch measured" aria-hidden="true"></i>有实测锚点的高度</span>
+        <span><i class="legend-swatch extrap" aria-hidden="true"></i>外推</span>
+      </div>
+      <details class="data-table">
+        <summary>看数字表</summary>
+        <div id="heightTable"></div>
+      </details>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="explainTitle">
+    <div class="panel-head">
+      <h2 id="explainTitle">怎么读这个结果？</h2>
+    </div>
+    <div class="explain-grid">
+      <div class="explain-card">
+        <div class="explain-icon good" aria-hidden="true">✓</div>
+        <h3>大数字是“最可能”的距离</h3>
+        <p>它不是保证值。同样的高度和风速，多抛几次，落点也会有波动。</p>
+      </div>
+      <div class="explain-card">
+        <div class="explain-icon info" aria-hidden="true">i</div>
+        <h3>范围比单个数更诚实</h3>
+        <p>“95% 范围”表示单次抛掷大概率落在这里。范围越宽，说明数据本身越分散。</p>
+      </div>
+      <div class="explain-card">
+        <div class="explain-icon warn" aria-hidden="true">!</div>
+        <h3>橙色提示表示“外推”</h3>
+        <p>这个高度或风速没有实测数据，结果只能看量级，不要当作精确落点。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel notes-panel" aria-labelledby="notesTitle">
+    <div class="panel-head">
+      <h2 id="notesTitle">这个预测是怎么来的？</h2>
+    </div>
+    <p>模型用 <strong>11.5 m 的 25 个实测点</strong> 和 <strong>1.55 m 的回归锚点</strong> 训练。表里的 7.5 / 13.5 / 15.5 m 是旧模型的推算值，9.5 m 来源未标注，它们都没有参与训练。</p>
+    <p id="currentModelNote">当前模型：基础模型（未使用本地新增数据）。</p>
+    <p>11.5 m 留一法验证：R² = <strong id="metaR2">0.898</strong>，RMSE = <strong id="metaRmse">1.11 m</strong>，95% 区间覆盖率 = <strong id="metaCoverage">96%</strong>。这意味着单次预测的误差大约在 1 米量级。</p>
+    <details>
+      <summary>查看模型公式和数据指标</summary>
+      <div class="formula">d(h,v) = 0.275145 · h<sup>0.973229</sup> · v + 0.208741 · h<sup>0.529831</sup></div>
+      <p>其中 h 是释放高度（m），v 是风速（m/s），d 是漂移距离（m）。模型的关键假设是：漂移距离随高度按幂律变化，并在给定高度下与风速近似线性。</p>
+      <p>为什么不用随机森林或神经网络？因为只有两个高度有真实数据，其中一个还只有回归摘要。黑箱模型无法从 25 个同高度数据点里学到“高度”的影响；把表内推算值当标签又会变成循环论证。因此采用物理约束回归，并用留一法和 5000 组 bootstrap 抽样给出不确定性。</p>
+      <p>输入超出 1–20 m / 0–5 m/s 的预计算网格时，点预测仍由公式直接计算；95% 区间用边界区间按预测距离缩放近似，外推越远越只能看量级。</p>
+    </details>
+    <div class="faq-grid">
+      <div class="faq-item">
+        <h3>为什么 15.5 m 会显示橙色？</h3>
+        <p>表里只有 1.55 m 和 11.5 m 两个高度真正测过。15.5 m 是用这两个锚点外推的，所以只能看量级。</p>
+      </div>
+      <div class="faq-item">
+        <h3>为什么范围有 4 米宽？</h3>
+        <p>同一风速下重复抛 5 次，落点本身就能差 1–2 米。单次预测必须把这个波动算进去。</p>
+      </div>
+      <div class="faq-item">
+        <h3>能用来精确控制落点吗？</h3>
+        <p>不建议。它适合课堂演示、方案对比和实验前估算，不适合安全边界或精确投放。</p>
+      </div>
+      <div class="faq-item">
+        <h3>1.55 m 和 11.5 m 是什么意思？</h3>
+        <p>它们是模型的两个实测锚点；1.55 m 是课内风扇实验，11.5 m 是室外抛伞实验，两者不是同一装置。</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span>仅供教学与量级判断 · 2026-10-20 · 数据来源：楼层抛伞记录.xlsx</span>
+  <span><a href="模型报告.md">完整模型报告</a> · <a href="漂移距离预测表.xlsx">预测表</a></span>
+</footer>
+
+<script>
+'use strict';
+
+/* ---------- 数据（由 build_web.py 注入） ---------- */
+const GRID = __GRID_JSON__;
+const META = __META_JSON__;
+
+/* ---------- 常量与工具 ---------- */
+const NS = 'http://www.w3.org/2000/svg';
+const H_FLOOR = 0.1, V_FLOOR = 0;
+const H_MEASURED = META.measured_heights;
+const V_MEASURED = META.measured_wind;
+const H_ANCHORS = META.measured_heights;
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
+function fmt1(x) { return Number(x).toFixed(1); }
+function fmt2(x) { return Number(x).toFixed(2); }
+function fmtHeight(x) { return String(Math.round(x * 100) / 100); }
+function fmtAxis(x) {
+  if (Math.abs(x) >= 100) return Math.round(x).toString();
+  if (Math.abs(x) >= 10) return (Math.round(x * 10) / 10).toString().replace(/\.0$/, '');
+  return (Math.round(x * 10) / 10).toString();
+}
+function niceCeil(x) {
+  if (!(x > 0)) return 1;
+  const exp = Math.floor(Math.log10(x));
+  const base = Math.pow(10, exp);
+  for (const s of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) {
+    if (s * base >= x) return s * base;
+  }
+  return 10 * base;
+}
+function niceTicks(min, max, count = 5) {
+  if (!(max > min)) return [min, max];
+  const step = niceCeil((max - min) / count);
+  const ticks = [];
+  for (let x = Math.ceil(min / step) * step; x <= max + 1e-9; x += step) {
+    ticks.push(Math.round(x * 1000) / 1000);
+  }
+  if (ticks.length < 2) return [min, max];
+  return ticks;
+}
+function svgEl(tag, attrs = {}) {
+  const el = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v !== undefined && v !== null) el.setAttribute(k, v);
+  }
+  return el;
+}
+function textEl(x, y, str, attrs = {}) {
+  const el = svgEl('text', { x, y, ...attrs });
+  el.textContent = str;
+  return el;
+}
+function colors() {
+  const s = getComputedStyle(document.documentElement);
+  const get = (n) => s.getPropertyValue(n).trim();
+  return {
+    surface: get('--surface'),
+    surface2: get('--surface-2'),
+    ink: get('--ink'),
+    ink2: get('--ink-2'),
+    muted: get('--muted'),
+    grid: get('--grid'),
+    axis: get('--axis'),
+    series: get('--series'),
+    measured: get('--measured-bg'),
+    extrap: get('--extrap-bg'),
+    infoBg: get('--info-bg')
+  };
+}
+
+/* ---------- 状态与主题 ---------- */
+function numOr(x, fallback) {
+  const n = parseFloat(x);
+  return Number.isFinite(n) ? n : fallback;
+}
+const params = new URLSearchParams(location.search);
+const state = {
+  h: Math.max(H_FLOOR, numOr(params.get('h'), 10)),
+  v: Math.max(V_FLOOR, numOr(params.get('v'), 2))
+};
+
+function loadTheme() {
+  try { return localStorage.getItem('drift-theme'); } catch (e) { return null; }
+}
+function saveTheme(t) {
+  try { localStorage.setItem('drift-theme', t); } catch (e) { /* file:// may block */ }
+}
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const urlTheme = params.get('theme');
+let theme = (urlTheme === 'dark' || urlTheme === 'light')
+  ? urlTheme
+  : (loadTheme() || (prefersDark ? 'dark' : 'light'));
+
+const ICONS = {
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+  warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>',
+  sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+};
+
+function applyTheme() {
+  document.documentElement.dataset.theme = theme;
+  const btn = $('#themeToggle');
+  btn.innerHTML = theme === 'dark' ? ICONS.sun : ICONS.moon;
+  btn.setAttribute('aria-label', theme === 'dark' ? '切换到浅色模式' : '切换到深色模式');
+}
+applyTheme();
+$('#themeToggle').addEventListener('click', () => {
+  theme = theme === 'dark' ? 'light' : 'dark';
+  saveTheme(theme);
+  applyTheme();
+  renderAll();
+});
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+  if (!loadTheme() && !urlTheme) {
+    theme = e.matches ? 'dark' : 'light';
+    applyTheme();
+    renderAll();
+  }
+});
+
+/* ---------- 模型计算 ---------- */
+function gridAt(h, v) {
+  const { h0, dh, nh, v0, dv, nv, data } = GRID;
+  const fi = clamp((h - h0) / dh, 0, nh - 1.0000001);
+  const fj = clamp((v - v0) / dv, 0, nv - 1.0000001);
+  const i0 = Math.floor(fi), i1 = Math.min(i0 + 1, nh - 1);
+  const j0 = Math.floor(fj), j1 = Math.min(j0 + 1, nv - 1);
+  const ti = fi - i0, tj = fj - j0;
+  const bil = (idx) => {
+    const a = data[i0][j0][idx], b = data[i1][j0][idx];
+    const c = data[i0][j1][idx], d = data[i1][j1][idx];
+    return a * (1 - ti) * (1 - tj) + b * ti * (1 - tj) + c * (1 - ti) * tj + d * ti * tj;
+  };
+  return { lo: bil(1), hi: bil(2) };
+}
+
+const GRID_H_MAX = GRID.h0 + GRID.dh * (GRID.nh - 1);
+const GRID_V_MAX = GRID.v0 + GRID.dv * (GRID.nv - 1);
+
+function basePointAt(h, v) {
+  const k = META.a_k * Math.pow(h, META.p_k);
+  const b = META.a_b * Math.pow(h, META.p_b);
+  const t = META.a_t * Math.pow(h, META.p_t);
+  const d = k * v + b;
+
+  const hc = clamp(h, GRID.h0, GRID_H_MAX);
+  const vc = clamp(v, GRID.v0, GRID_V_MAX);
+  const g = gridAt(hc, vc);
+  let lo, hi;
+  if (Math.abs(h - hc) < 1e-9 && Math.abs(v - vc) < 1e-9) {
+    lo = Math.min(g.lo, d);
+    hi = Math.max(g.hi, d);
+  } else {
+    // 超出预计算网格：用边界区间按预测距离缩放，作近似区间
+    const dEdge = META.a_k * Math.pow(hc, META.p_k) * vc + META.a_b * Math.pow(hc, META.p_b);
+    const scale = Math.max(1, Math.sqrt(Math.max(d, 1e-9) / Math.max(dEdge, 1e-9)));
+    lo = Math.max(0, d - Math.max(0, dEdge - g.lo) * scale);
+    hi = d + Math.max(0, g.hi - dEdge) * scale;
+  }
+  return { d, k, b, t, lo, hi };
+}
+
+/* ---------- 现场校准（训练模式） ----------
+   修正量：Δ = c0 + c1·(h-10)/10 + c2·(v-2)/2
+   以原模型为基准；新数据只用来估计这三个修正量。 */
+const CAL_KEY = 'drift-calibration-v1';
+const CAL_MODE_KEY = 'drift-training-mode-v1';
+const CAL_SNAPSHOT_KEY = 'drift-solidified-model-v1';
+const CAL_REF = { h: 10, v: 2, hs: 10, vs: 2 };
+const CAL_PRIOR = [2.0, 1.0, 1.0]; // 先验标准差：整体偏移 2 m；高度趋势 1 m/10m；风速趋势 1 m/2(m/s)
+const calibrationStrength = 1;
+
+let storageBlocked = false;
+let userData = loadUserData();
+let lastSolidifiedAt = loadSnapshotSavedAt();
+let trainingMode = params.get('training') === '1' || loadTrainingMode();
+let calibration = {
+  rawC: [0, 0, 0],
+  rawCov: zero3(),
+  c: [0, 0, 0],
+  cov: zero3(),
+  n: 0,
+  metrics: null
+};
+
+function zero3() {
+  return [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+}
+function dot3(a, b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+function solve3(A, b) {
+  const M = A.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < 3; col++) {
+    let pivot = col;
+    for (let r = col + 1; r < 3; r++) {
+      if (Math.abs(M[r][col]) > Math.abs(M[pivot][col])) pivot = r;
+    }
+    if (Math.abs(M[pivot][col]) < 1e-12) return [0, 0, 0];
+    [M[col], M[pivot]] = [M[pivot], M[col]];
+    const pv = M[col][col];
+    for (let c = col; c < 4; c++) M[col][c] /= pv;
+    for (let r = 0; r < 3; r++) {
+      if (r === col) continue;
+      const f = M[r][col];
+      for (let c = col; c < 4; c++) M[r][c] -= f * M[col][c];
+    }
+  }
+  return [M[0][3], M[1][3], M[2][3]];
+}
+function inv3(A) {
+  const out = zero3();
+  for (let j = 0; j < 3; j++) {
+    const col = solve3(A, [j === 0 ? 1 : 0, j === 1 ? 1 : 0, j === 2 ? 1 : 0]);
+    for (let i = 0; i < 3; i++) out[i][j] = col[i];
+  }
+  return out;
+}
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  if (!s.length) return 0;
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function mad(arr) {
+  const m = median(arr);
+  return median(arr.map((x) => Math.abs(x - m)));
+}
+function sigmaAt(h) {
+  const q = Math.log(META.sigma_h2 / META.sigma_h1) / Math.log(META.h2 / META.h1);
+  return META.sigma_h1 * Math.pow(h / META.h1, q);
+}
+function calFeatures(h, v) {
+  return [1, (h - CAL_REF.h) / CAL_REF.hs, (v - CAL_REF.v) / CAL_REF.vs];
+}
+function loadTrainingMode() {
+  try { return localStorage.getItem(CAL_MODE_KEY) === '1'; } catch (e) { return false; }
+}
+function saveTrainingMode(on) {
+  try { localStorage.setItem(CAL_MODE_KEY, on ? '1' : '0'); } catch (e) { storageBlocked = true; }
+}
+function makeId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+}
+function loadUserData() {
+  try {
+    const raw = localStorage.getItem(CAL_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((u) => {
+      const h = Number(u.h), v = Number(u.v), d = Number(u.d);
+      return Number.isFinite(h) && Number.isFinite(v) && Number.isFinite(d)
+        && h >= H_FLOOR && v >= V_FLOOR && d >= 0;
+    }).map((u) => ({
+      id: String(u.id || makeId()),
+      h: Number(u.h), v: Number(u.v), d: Number(u.d),
+      created: u.created || ''
+    }));
+  } catch (e) { storageBlocked = true; return []; }
+}
+function saveUserData() {
+  try { localStorage.setItem(CAL_KEY, JSON.stringify(userData)); } catch (e) { storageBlocked = true; }
+}
+function loadSnapshotSavedAt() {
+  try {
+    const raw = localStorage.getItem(CAL_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const snap = JSON.parse(raw);
+    return typeof snap.saved_at === 'string' ? snap.saved_at : null;
+  } catch (e) { return null; }
+}
+function fmtSavedTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+function buildSolidifiedModel(savedAt) {
+  const m = calibration.metrics || trainingMetrics();
+  return {
+    schema_version: 2,
+    model_type: 'base_plus_calibration',
+    saved_at: savedAt,
+    target: '漂移距离 d (m)',
+    inputs: ['释放高度 h (m)', '风速 v (m/s)'],
+    formula: 'd = a_k*h^p_k*v + a_b*h^p_b + c0 + c1*(h-10)/10 + c2*(v-2)/2',
+    parameters: {
+      a_k: META.a_k, p_k: META.p_k,
+      a_b: META.a_b, p_b: META.p_b,
+      a_t: META.a_t, p_t: META.p_t
+    },
+    anchors: META.base_anchors,
+    uncertainty: {
+      h1: META.h1, h2: META.h2,
+      sigma_h1: META.sigma_h1, sigma_h2: META.sigma_h2,
+      anchor_draws: META.base_anchor_draws,
+      note: '500 组下采样 bootstrap 抽样，用于 Python 区间估计'
+    },
+    calibration: {
+      c: calibration.c,
+      cov: calibration.cov,
+      reference: CAL_REF,
+      n_samples: userData.length,
+      data: userData
+    },
+    applicable_range: { height: META.measured_heights, wind: META.measured_wind },
+    metrics: {
+      loo_base_rmse: m.looBase ? m.looBase.rmse : null,
+      loo_cal_rmse: m.looCal ? m.looCal.rmse : null,
+      orig_base_rmse: m.origBase ? m.origBase.rmse : null,
+      orig_cal_rmse: m.origCal ? m.origCal.rmse : null
+    },
+    notes: [
+      '基础模型来自 11.5 m 的 25 个实测点 + 1.55 m 回归锚点。',
+      'calibration 为网页训练模式自动固化的现场校准层。',
+      'c0/c1/c2 与 cov 为完全采用新数据时的有效值。',
+      '数据只代表录入时的装置/场地；不同装置建议分别保存模型。'
+    ]
+  };
+}
+function solidifyModel() {
+  if (!userData.length) {
+    lastSolidifiedAt = null;
+    try { localStorage.removeItem(CAL_SNAPSHOT_KEY); } catch (e) { storageBlocked = true; }
+    return;
+  }
+  lastSolidifiedAt = new Date().toISOString();
+  const snap = buildSolidifiedModel(lastSolidifiedAt);
+  try { localStorage.setItem(CAL_SNAPSHOT_KEY, JSON.stringify(snap)); } catch (e) { storageBlocked = true; }
+}
+
+function fitCalibration(data) {
+  const n = data.length;
+  if (!n) return { rawC: [0, 0, 0], rawCov: zero3(), n: 0 };
+  const X = data.map((u) => calFeatures(u.h, u.v));
+  const y = data.map((u) => u.d - basePointAt(u.h, u.v).d);
+  const sig2 = data.map((u) => Math.pow(Math.max(0.5, sigmaAt(u.h)), 2));
+  const lam = CAL_PRIOR.map((t) => 1 / (t * t));
+  let c = [0, 0, 0];
+  let A = zero3();
+  for (let iter = 0; iter < 30; iter++) {
+    const r = y.map((yi, i) => yi - dot3(X[i], c));
+    const scale = Math.max(0.5, 1.4826 * mad(r));
+    const w = r.map((ri, i) => {
+      const abs = Math.abs(ri);
+      const hub = abs <= 1.5 * scale ? 1 : (1.5 * scale) / abs;
+      return hub / sig2[i];
+    });
+    A = zero3();
+    const rhs = [0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      for (let a = 0; a < 3; a++) {
+        rhs[a] += w[i] * X[i][a] * y[i];
+        for (let b = 0; b < 3; b++) A[a][b] += w[i] * X[i][a] * X[i][b];
+      }
+    }
+    for (let a = 0; a < 3; a++) A[a][a] += lam[a];
+    const cNew = solve3(A, rhs);
+    const diff = Math.max(...cNew.map((x, i) => Math.abs(x - c[i])));
+    c = cNew;
+    if (diff < 1e-9) break;
+  }
+  return { rawC: c, rawCov: inv3(A), n };
+}
+
+function applyStrength() {
+  const s = calibrationStrength;
+  calibration.c = calibration.rawC.map((x) => x * s);
+  calibration.cov = calibration.rawCov.map((row) => row.map((x) => x * s * s));
+  calibration.n = userData.length;
+}
+
+function calibratedPoint(h, v) {
+  const base = basePointAt(h, v);
+  const zh = (h - CAL_REF.h) / CAL_REF.hs;
+  const zv = (v - CAL_REF.v) / CAL_REF.vs;
+  const x = [1, zh, zv];
+  const c = calibration.c;
+  const corr = c[0] + c[1] * zh + c[2] * zv;
+  let varCorr = 0;
+  for (let a = 0; a < 3; a++) {
+    for (let b = 0; b < 3; b++) varCorr += x[a] * calibration.cov[a][b] * x[b];
+  }
+  varCorr = Math.max(0, varCorr);
+  const sigmaCorr = Math.sqrt(varCorr);
+  const widen = 1.96 * sigmaCorr;
+  const d = base.d + corr;
+  return {
+    ...base,
+    d,
+    k: base.k + c[2] / CAL_REF.vs,
+    b: base.b + c[0] + c[1] * zh - c[2],
+    lo: Math.max(0, base.lo + corr - widen),
+    hi: base.hi + corr + widen,
+    baseD: base.d,
+    corr,
+    sigmaCorr
+  };
+}
+
+function rmse(arr) {
+  return Math.sqrt(arr.reduce((s, x) => s + x * x, 0) / arr.length);
+}
+function mae(arr) {
+  return arr.reduce((s, x) => s + Math.abs(x), 0) / arr.length;
+}
+function trainingMetrics() {
+  const n = userData.length;
+  if (!n) return { n: 0, rows: [], looBase: null, looCal: null, origBase: null, origCal: null };
+  const rows = userData.map((u) => {
+    const base = basePointAt(u.h, u.v);
+    const cal = calibratedPoint(u.h, u.v);
+    return { u, baseD: base.d, calD: cal.d, residual: u.d - cal.d, baseResidual: u.d - base.d };
+  });
+
+  let looBase = null, looCal = null;
+  if (n >= 2) {
+    const bRes = [], cRes = [];
+    for (let i = 0; i < n; i++) {
+      const others = userData.filter((_, j) => j !== i);
+      const fit = fitCalibration(others);
+      const c = fit.rawC.map((x) => x * calibrationStrength);
+      const u = userData[i];
+      const x = calFeatures(u.h, u.v);
+      const baseD = basePointAt(u.h, u.v).d;
+      bRes.push(u.d - baseD);
+      cRes.push(u.d - (baseD + dot3(x, c)));
+    }
+    looBase = { rmse: rmse(bRes), mae: mae(bRes) };
+    looCal = { rmse: rmse(cRes), mae: mae(cRes) };
+  }
+
+  let origBase = null, origCal = null;
+  if (Array.isArray(META.train_points) && META.train_points.length) {
+    const bRes = [], cRes = [];
+    for (const p of META.train_points) {
+      bRes.push(p.d - basePointAt(p.h, p.v).d);
+      cRes.push(p.d - calibratedPoint(p.h, p.v).d);
+    }
+    origBase = { rmse: rmse(bRes), mae: mae(bRes) };
+    origCal = { rmse: rmse(cRes), mae: mae(cRes) };
+  }
+  return { n, rows, looBase, looCal, origBase, origCal };
+}
+
+function recomputeCalibration() {
+  const fit = fitCalibration(userData);
+  calibration.rawC = fit.rawC;
+  calibration.rawCov = fit.rawCov;
+  calibration.n = userData.length;
+  applyStrength();
+  calibration.metrics = trainingMetrics();
+}
+
+function reliabilityInfo() {
+  const n = userData.length;
+  if (!n) return { score: 0, label: '未启用', cls: '' };
+  const p = calibratedPoint(state.h, state.v);
+  const score = clamp(1 - p.sigmaCorr / 2, 0, 1);
+  let label, cls;
+  if (score < 0.35) { label = '较弱'; cls = 'serious'; }
+  else if (n < 3 || score < 0.55) { label = '初步（样本少）'; cls = 'warn'; }
+  else if (n < 6 || score < 0.7) { label = '中等'; cls = ''; }
+  else { label = '较好'; cls = ''; }
+  return { score, label, cls };
+}
+
+function updateModelState() {
+  const n = userData.length;
+  const el = $('#modelState');
+  if (n) {
+    el.className = 'model-state calibrated';
+    el.innerHTML = `<span class="dot info" aria-hidden="true"></span><span>已固化模型 · ${n} 条本地数据</span>`;
+  } else {
+    el.className = 'model-state';
+    el.innerHTML = `<span class="dot good" aria-hidden="true"></span><span>基础模型</span>`;
+  }
+  $('#currentModelNote').textContent = n
+    ? `当前模型：已固化（基础模型 + ${n} 条本地数据，保存在本机浏览器）。`
+    : '当前模型：基础模型（未使用本地新增数据）。';
+  const count = $('#trainingCount');
+  count.textContent = String(n);
+  count.hidden = n === 0;
+  const badge = $('#trainingBadge');
+  badge.textContent = n ? `已固化 · ${n} 条` : '原始模型';
+  badge.className = n ? 'badge info' : 'badge';
+}
+
+function isAnchorHeight(h) {
+  return H_ANCHORS.some((a) => Math.abs(h - a) <= 0.011);
+}
+
+function statusFor(h, v) {
+  const [h1, h2] = H_MEASURED;
+  const [v1, v2] = V_MEASURED;
+  const anchor = isAnchorHeight(h);
+  const hWithin = h >= h1 && h <= h2;
+  const hInterp = hWithin && !anchor;
+  const hExtrap = !hWithin;
+  const vWithin = v >= v1 && v <= v2;
+  const vLow = v < v1;
+  const vHigh = v > v2;
+
+  let level, badge, headline;
+  if (hExtrap && !vWithin) {
+    level = 'serious'; badge = '高度 + 风速外推';
+    headline = '这个高度和风速都超出了实测范围，结果只能作量级参考。';
+  } else if (hExtrap) {
+    level = 'warn'; badge = '高度外推';
+    headline = '这个高度超出了实测范围，结果只能作量级参考。';
+  } else if (hInterp && !vWithin) {
+    level = 'warn'; badge = '高度内插 + 风速外推';
+    headline = '高度是插值，风速又超出了实测范围，误差会更大。';
+  } else if (hInterp) {
+    level = 'info'; badge = '高度内插';
+    headline = '这个高度没有实测，是由两个实测锚点插值得到的。';
+  } else if (!vWithin) {
+    level = 'warn'; badge = '风速外推';
+    headline = '风速超出了实测范围，结果只能作量级参考。';
+  } else {
+    level = 'good'; badge = '实测高度范围内';
+    headline = '这个高度和风速都有实测数据作支撑。';
+  }
+
+  const hText = anchor
+    ? `高度 ${fmtHeight(h)} m 是实测锚点。`
+    : hInterp
+      ? `高度 ${fmtHeight(h)} m 介于 1.55 和 11.5 m 之间，是内插。`
+      : `高度 ${fmtHeight(h)} m 不在 1.55–11.5 m 的实测锚点范围内。`;
+  const vText = vWithin
+    ? `风速 ${fmt1(v)} m/s 在实测范围 0.2–3.3 m/s 内。`
+    : vLow
+      ? '风速低于实测下限 0.2 m/s，预测值接近零风偏移。'
+      : '风速高于实测上限 3.3 m/s。';
+  return { level, badge, headline, detail: hText + vText, anchor, hInterp, hExtrap, vWithin };
+}
+
+function floorHint(h) {
+  if (h < 2.5) return '不足 1 层楼高';
+  return `约 ${Math.round(h / 3)} 层楼高（按 3 m/层）`;
+}
+function windHint(v) {
+  if (v < 0.3) return '几乎无风';
+  if (v < 1.6) return '微风';
+  if (v < 3.4) return '轻风';
+  if (v < 5.1) return '和风';
+  return '风偏大';
+}
+
+/* ---------- 落点示意 ---------- */
+function renderLanding(p) {
+  const host = $('#landingDiagram');
+  const W = Math.max(320, host.clientWidth || 600);
+  const H = 245;
+  host.innerHTML = '';
+  const c = colors();
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${W} ${H}`,
+    role: 'img',
+    'aria-label': `俯视落点示意图：释放高度 ${fmt1(state.h)} 米，风速 ${fmt1(state.v)} 米每秒，预计漂移 ${fmt1(p.d)} 米，95% 范围 ${fmt1(p.lo)} 到 ${fmt1(p.hi)} 米。`
+  });
+  const title = svgEl('title'); title.textContent = '落点示意图'; svg.appendChild(title);
+
+  const m = { l: 58, r: 26, t: 26, b: 50 };
+  const groundY = H - m.b;
+  const xMax = niceCeil(Math.max(5, p.hi * 1.18));
+  const x = (v) => m.l + (v / xMax) * (W - m.l - m.r);
+
+  // 地面线与刻度
+  svg.appendChild(svgEl('line', { x1: m.l, y1: groundY, x2: W - m.r, y2: groundY, stroke: c.axis, 'stroke-width': 1 }));
+  const step = niceCeil(xMax / 5);
+  for (let t = 0; t <= xMax + 1e-9; t += step) {
+    const xx = x(t);
+    svg.appendChild(svgEl('line', { x1: xx, y1: groundY - 4, x2: xx, y2: groundY + 4, stroke: c.axis, 'stroke-width': 1 }));
+    svg.appendChild(textEl(xx, groundY + 20, fmtAxis(t), { fill: c.muted, 'font-size': 10.5, 'text-anchor': 'middle' }));
+  }
+
+  // 95% 范围带
+  const bx0 = x(p.lo), bx1 = x(p.hi);
+  const bw = Math.max(2, bx1 - bx0);
+  svg.appendChild(svgEl('rect', { x: bx0, y: groundY - 7, width: bw, height: 14, rx: 7, fill: c.series, opacity: 0.16 }));
+  svg.appendChild(svgEl('line', { x1: bx0, y1: groundY, x2: bx1, y2: groundY, stroke: c.series, 'stroke-width': 1, opacity: 0.45 }));
+  if (bw >= 48) {
+    svg.appendChild(textEl((bx0 + bx1) / 2, groundY + 36, '95% 范围', { fill: c.muted, 'font-size': 10.5, 'text-anchor': 'middle' }));
+  }
+
+  // 风箭头
+  const ax = m.l + 6, ay = 42, ax2 = ax + 84;
+  svg.appendChild(svgEl('line', { x1: ax, y1: ay, x2: ax2, y2: ay, stroke: c.ink2, 'stroke-width': 2, 'stroke-linecap': 'round' }));
+  svg.appendChild(svgEl('path', { d: `M ${ax2} ${ay} l -9 -5 v 10 z`, fill: c.ink2 }));
+  svg.appendChild(textEl(ax2 + 8, ay + 4, `风 ${fmt1(state.v)} m/s`, { fill: c.ink2, 'font-size': 12, 'font-weight': 600 }));
+
+  // 释放点：小降落伞
+  const rx = x(0);
+  svg.appendChild(svgEl('path', {
+    d: `M ${rx - 19} ${groundY - 43} Q ${rx} ${groundY - 67} ${rx + 19} ${groundY - 43}`,
+    fill: 'none', stroke: c.series, 'stroke-width': 2.2, 'stroke-linecap': 'round'
+  }));
+  svg.appendChild(svgEl('path', {
+    d: `M ${rx - 19} ${groundY - 43} L ${rx} ${groundY - 26} M ${rx + 19} ${groundY - 43} L ${rx} ${groundY - 26}`,
+    fill: 'none', stroke: c.series, 'stroke-width': 1.3
+  }));
+  svg.appendChild(svgEl('circle', { cx: rx, cy: groundY - 22, r: 4.5, fill: c.series, stroke: c.surface, 'stroke-width': 1.5 }));
+  svg.appendChild(textEl(rx, groundY + 36, '释放点', { fill: c.ink2, 'font-size': 11.5, 'text-anchor': 'middle' }));
+
+  // 预计落点
+  const lx = x(p.d);
+  svg.appendChild(svgEl('line', { x1: lx, y1: groundY, x2: lx, y2: groundY - 26, stroke: c.series, 'stroke-width': 2 }));
+  svg.appendChild(svgEl('circle', { cx: lx, cy: groundY - 33, r: 7, fill: c.series, stroke: c.surface, 'stroke-width': 2.5 }));
+  const label = `预计 ${fmt1(p.d)} m`;
+  const anchor = lx > W - 110 ? 'end' : (lx < m.l + 55 ? 'start' : 'middle');
+  const tx = anchor === 'end' ? lx - 8 : (anchor === 'start' ? lx + 10 : lx);
+  svg.appendChild(textEl(tx, groundY - 48, label, {
+    fill: c.ink, 'font-size': 12.5, 'font-weight': 700, 'text-anchor': anchor,
+    stroke: c.surface, 'stroke-width': 3, 'paint-order': 'stroke'
+  }));
+
+  svg.appendChild(textEl(W - m.r, groundY + 36, '下风向', { fill: c.muted, 'font-size': 10.5, 'text-anchor': 'end' }));
+  host.appendChild(svg);
+}
+
+/* ---------- 折线图 ---------- */
+function drawLineChart(host, cfg) {
+  const W = Math.max(320, host.clientWidth || 600);
+  const H = W < 430 ? 250 : 300;
+  host.innerHTML = '';
+  const c = colors();
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': cfg.aria });
+  const title = svgEl('title'); title.textContent = cfg.title; svg.appendChild(title);
+  const desc = svgEl('desc'); desc.textContent = cfg.desc; svg.appendChild(desc);
+
+  const m = { l: 52, r: 18, t: 30, b: 42 };
+  const pw = W - m.l - m.r;
+  const ph = H - m.t - m.b;
+  const yMax = cfg.yMax;
+  const x = (v) => m.l + ((v - cfg.xMin) / (cfg.xMax - cfg.xMin)) * pw;
+  const y = (v) => m.t + ph - (v / yMax) * ph;
+
+  // 实测 / 外推底色
+  if (cfg.measured) {
+    const mx0 = x(Math.max(cfg.xMin, cfg.measured[0]));
+    const mx1 = x(Math.min(cfg.xMax, cfg.measured[1]));
+    svg.appendChild(svgEl('rect', { x: mx0, y: m.t, width: Math.max(0, mx1 - mx0), height: ph, fill: c.measured }));
+    if (cfg.measured[0] > cfg.xMin) {
+      svg.appendChild(svgEl('rect', { x: x(cfg.xMin), y: m.t, width: Math.max(0, x(cfg.measured[0]) - x(cfg.xMin)), height: ph, fill: c.extrap }));
+    }
+    if (cfg.measured[1] < cfg.xMax) {
+      svg.appendChild(svgEl('rect', { x: x(cfg.measured[1]), y: m.t, width: Math.max(0, x(cfg.xMax) - x(cfg.measured[1])), height: ph, fill: c.extrap }));
+    }
+  }
+
+  // 网格与坐标
+  const yTicks = 5;
+  for (let i = 0; i <= yTicks; i++) {
+    const val = (yMax * i) / yTicks;
+    const yy = y(val);
+    svg.appendChild(svgEl('line', { x1: m.l, y1: yy, x2: W - m.r, y2: yy, stroke: c.grid, 'stroke-width': 1 }));
+    svg.appendChild(textEl(m.l - 8, yy + 4, fmtAxis(val), { fill: c.muted, 'font-size': 10.5, 'text-anchor': 'end' }));
+  }
+  cfg.xTicks.forEach((t) => {
+    const xx = x(t);
+    svg.appendChild(svgEl('line', { x1: xx, y1: m.t, x2: xx, y2: m.t + ph, stroke: c.grid, 'stroke-width': 1 }));
+    svg.appendChild(textEl(xx, H - m.b + 20, fmtAxis(t), { fill: c.muted, 'font-size': 10.5, 'text-anchor': 'middle' }));
+  });
+  svg.appendChild(svgEl('line', { x1: m.l, y1: m.t + ph, x2: W - m.r, y2: m.t + ph, stroke: c.axis, 'stroke-width': 1 }));
+
+  // 95% 范围带与主线
+  const pts = cfg.samples;
+  if (pts.length) {
+    let band = `M ${x(pts[0].x)} ${y(pts[0].hi)}`;
+    for (let i = 1; i < pts.length; i++) band += ` L ${x(pts[i].x)} ${y(pts[i].hi)}`;
+    for (let i = pts.length - 1; i >= 0; i--) band += ` L ${x(pts[i].x)} ${y(pts[i].lo)}`;
+    band += ' Z';
+    svg.appendChild(svgEl('path', { d: band, fill: c.series, opacity: 0.10, stroke: 'none' }));
+
+    let line = `M ${x(pts[0].x)} ${y(pts[0].y)}`;
+    for (let i = 1; i < pts.length; i++) line += ` L ${x(pts[i].x)} ${y(pts[i].y)}`;
+    svg.appendChild(svgEl('path', {
+      d: line, fill: 'none', stroke: c.series, 'stroke-width': 2,
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round'
+    }));
+  }
+
+  // 范围说明
+  if (cfg.measured) {
+    const mid = (Math.max(cfg.xMin, cfg.measured[0]) + Math.min(cfg.xMax, cfg.measured[1])) / 2;
+    svg.appendChild(textEl(x(mid), m.t + 16, '实测范围', { fill: c.ink2, 'font-size': 10.5, 'text-anchor': 'middle' }));
+    if (cfg.measured[1] < cfg.xMax) {
+      svg.appendChild(textEl(W - m.r - 4, m.t + ph - 8, '外推', { fill: c.ink2, 'font-size': 10.5, 'text-anchor': 'end' }));
+    }
+  }
+
+  // 轴标题
+  svg.appendChild(textEl(m.l - 8, m.t - 12, cfg.yLabel, { fill: c.ink2, 'font-size': 11.5, 'text-anchor': 'start' }));
+  svg.appendChild(textEl((m.l + W - m.r) / 2, H - 6, cfg.xLabel, { fill: c.ink2, 'font-size': 11.5, 'text-anchor': 'middle' }));
+
+  // 当前点
+  const cx = x(cfg.current.x);
+  const cy = y(cfg.current.y);
+  svg.appendChild(svgEl('line', { x1: cx, y1: m.t, x2: cx, y2: m.t + ph, stroke: c.axis, 'stroke-width': 1, opacity: 0.85 }));
+  svg.appendChild(svgEl('circle', { cx, cy, r: 6.5, fill: c.series, stroke: c.surface, 'stroke-width': 2.5 }));
+  const labelAnchor = cx > W - 92 ? 'end' : 'start';
+  const labelX = labelAnchor === 'end' ? cx - 10 : cx + 10;
+  svg.appendChild(textEl(labelX, cy - 12, cfg.current.label, {
+    fill: c.ink, 'font-size': 12.5, 'font-weight': 700, 'text-anchor': labelAnchor,
+    stroke: c.surface, 'stroke-width': 3, 'paint-order': 'stroke'
+  }));
+
+  // 悬停层
+  const hover = svgEl('g', { opacity: 0, 'pointer-events': 'none' });
+  const hLine = svgEl('line', { y1: m.t, y2: m.t + ph, stroke: c.axis, 'stroke-width': 1, opacity: 0.9 });
+  const hDot = svgEl('circle', { r: 4.5, fill: c.series, stroke: c.surface, 'stroke-width': 1.5 });
+  hover.append(hLine, hDot);
+  svg.appendChild(hover);
+
+  const overlay = svgEl('rect', {
+    x: m.l, y: m.t, width: pw, height: ph, fill: 'transparent',
+    style: 'cursor: crosshair; touch-action: pan-y;'
+  });
+  svg.appendChild(overlay);
+
+  const tip = document.createElement('div');
+  tip.className = 'chart-tooltip';
+  tip.setAttribute('aria-hidden', 'true');
+
+  const showTip = (s) => {
+    const sr = svg.getBoundingClientRect();
+    const px = (x(s.x) / W) * sr.width;
+    const py = (y(s.y) / H) * sr.height;
+    tip.innerHTML = `<div class="tip-title">${cfg.tipTitle(s)}</div>` +
+      `<div class="tip-value">${fmt1(s.y)} m</div>` +
+      `<div class="tip-range">95% 范围 ${fmt1(s.lo)}–${fmt1(s.hi)} m</div>`;
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth || 140;
+    tip.style.left = `${clamp(px - tw / 2, 4, Math.max(4, sr.width - tw - 4))}px`;
+    tip.style.top = `${clamp(py - 82, 4, Math.max(4, sr.height - 78))}px`;
+  };
+
+  overlay.addEventListener('pointermove', (ev) => {
+    const sr = svg.getBoundingClientRect();
+    const px = ((ev.clientX - sr.left) / sr.width) * W;
+    const frac = clamp((px - m.l) / pw, 0, 1);
+    const xv = cfg.xMin + frac * (cfg.xMax - cfg.xMin);
+    let best = pts[0], bd = Infinity;
+    for (const s of pts) {
+      const dd = Math.abs(s.x - xv);
+      if (dd < bd) { bd = dd; best = s; }
+    }
+    hover.setAttribute('opacity', '1');
+    hLine.setAttribute('x1', x(best.x));
+    hLine.setAttribute('x2', x(best.x));
+    hDot.setAttribute('cx', x(best.x));
+    hDot.setAttribute('cy', y(best.y));
+    showTip(best);
+  });
+  overlay.addEventListener('pointerleave', () => {
+    hover.setAttribute('opacity', '0');
+    tip.style.display = 'none';
+  });
+
+  host.appendChild(svg);
+  host.appendChild(tip);
+}
+
+function renderWindChart(current) {
+  const vMax = Math.max(5, niceCeil(state.v * 1.3));
+  const samples = [];
+  const N = 110;
+  for (let i = 0; i <= N; i++) {
+    const xv = (vMax * i) / N;
+    const p = calibratedPoint(state.h, xv);
+    samples.push({ x: xv, y: p.d, lo: p.lo, hi: p.hi });
+  }
+  const yMax = niceCeil(Math.max(...samples.map((s) => s.hi), current.hi) * 1.06);
+  drawLineChart($('#windChart'), {
+    aria: `风速与漂移距离的关系。当前高度 ${fmtHeight(state.h)} 米，风速从 0 到 ${fmtAxis(vMax)} 米每秒时，漂移距离从 ${fmt1(samples[0].y)} 米增加到 ${fmt1(samples[samples.length - 1].y)} 米。`,
+    title: '风速与漂移距离',
+    desc: '蓝色线是点预测，浅色带是 95% 预测范围；绿色底色是实测风速范围，橙色底色是外推区。',
+    xMin: 0, xMax: vMax, yMax,
+    samples,
+    current: { x: state.v, y: current.d, label: `${fmt1(current.d)} m` },
+    measured: V_MEASURED,
+    xTicks: niceTicks(0, vMax, 5),
+    xLabel: '风速 (m/s)',
+    yLabel: '漂移距离 (m)',
+    tipTitle: (s) => `风速 ${fmtAxis(s.x)} m/s`
+  });
+}
+
+function renderHeightChart(current) {
+  const hMax = Math.max(20, niceCeil(state.h * 1.3));
+  const hMin = Math.max(H_FLOOR, Math.min(1, state.h * 0.6));
+  const samples = [];
+  const N = 110;
+  for (let i = 0; i <= N; i++) {
+    const h = hMin + ((hMax - hMin) * i) / N;
+    const p = calibratedPoint(h, state.v);
+    samples.push({ x: h, y: p.d, lo: p.lo, hi: p.hi });
+  }
+  const yMax = niceCeil(Math.max(...samples.map((s) => s.hi), current.hi) * 1.06);
+  drawLineChart($('#heightChart'), {
+    aria: `释放高度与漂移距离的关系。当前风速 ${fmt1(state.v)} 米每秒，释放高度从 ${fmtAxis(hMin)} 米到 ${fmtAxis(hMax)} 米时，漂移距离从 ${fmt1(samples[0].y)} 米增加到 ${fmt1(samples[samples.length - 1].y)} 米。`,
+    title: '释放高度与漂移距离',
+    desc: '蓝色线是点预测，浅色带是 95% 预测范围；绿色底色是有实测锚点的高度范围，橙色底色是外推区。',
+    xMin: hMin, xMax: hMax, yMax,
+    samples,
+    current: { x: state.h, y: current.d, label: `${fmt1(current.d)} m` },
+    measured: H_MEASURED,
+    xTicks: niceTicks(hMin, hMax, 5),
+    xLabel: '释放高度 (m)',
+    yLabel: '漂移距离 (m)',
+    tipTitle: (s) => `高度 ${fmtAxis(s.x)} m`
+  });
+}
+
+/* ---------- 表格 ---------- */
+function renderWindTable() {
+  const maxV = Math.max(5, state.v * 1.15);
+  const step = maxV <= 6 ? 0.5 : niceCeil(maxV / 12);
+  const set = new Set();
+  for (let v = 0; v <= maxV + 1e-9; v += step) set.add(Math.round(v * 1000) / 1000);
+  set.add(Math.round(state.v * 1000) / 1000);
+  const winds = [...set].sort((a, b) => a - b);
+  const rows = winds.map((v) => {
+    const p = calibratedPoint(state.h, v);
+    const current = Math.abs(v - state.v) <= 0.001;
+    return `<tr class="${current ? 'current' : ''}">` +
+      `<td>${fmtAxis(v)}</td>` +
+      `<td>${fmt1(p.d)}</td>` +
+      `<td>${fmt1(p.lo)} – ${fmt1(p.hi)}</td>` +
+      `</tr>`;
+  }).join('');
+  $('#windTable').innerHTML = `<table><caption class="sr-only">当前高度 ${fmtHeight(state.h)} 米时，不同风速下的漂移距离预测</caption>` +
+    `<thead><tr><th scope="col">风速 (m/s)</th><th scope="col">预测漂移 (m)</th><th scope="col">95% 范围 (m)</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table>`;
+}
+
+function renderHeightTable() {
+  const maxH = Math.max(20, state.h * 1.15);
+  const step = maxH <= 25 ? 2.5 : niceCeil(maxH / 12);
+  const set = new Set([1.55, 3, 5, 7.5, 9.5, 11.5, 13.5, 15.5, 18, 20]);
+  for (let h = step; h <= maxH + 1e-9; h += step) set.add(Math.round(h * 1000) / 1000);
+  set.add(Math.round(state.h * 1000) / 1000);
+  const heights = [...set].sort((a, b) => a - b);
+  const rows = heights.map((h) => {
+    const p = calibratedPoint(h, state.v);
+    const anchor = isAnchorHeight(h);
+    const within = h >= H_MEASURED[0] && h <= H_MEASURED[1];
+    const kind = anchor ? 'good' : (within ? 'info' : 'warn');
+    const word = anchor ? '实测' : (within ? '内插' : '外推');
+    const current = Math.abs(h - state.h) <= 0.001;
+    return `<tr class="${current ? 'current' : ''}">` +
+      `<td>${fmtHeight(h)}</td>` +
+      `<td>${fmt1(p.d)}</td>` +
+      `<td>${fmt1(p.lo)} – ${fmt1(p.hi)}</td>` +
+      `<td><span class="dot ${kind}"></span>${word}</td>` +
+      `</tr>`;
+  }).join('');
+  $('#heightTable').innerHTML = `<table><caption class="sr-only">当前风速 ${fmt1(state.v)} 米每秒时，不同释放高度下的漂移距离预测</caption>` +
+    `<thead><tr><th scope="col">高度 (m)</th><th scope="col">预测漂移 (m)</th><th scope="col">95% 范围 (m)</th><th scope="col">数据性质</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table>`;
+}
+
+/* ---------- 训练模式界面 ---------- */
+function signed2(x) {
+  return `${x >= 0 ? '+' : ''}${fmt2(x)}`;
+}
+
+function setTrainingDefaults() {
+  $('#trainHeight').value = fmtHeight(state.h);
+  $('#trainWind').value = fmt1(state.v);
+}
+
+function setTrainingMessage(html, kind = 'ok') {
+  const el = $('#trainingMessage');
+  if (!html) {
+    el.hidden = true;
+    el.textContent = '';
+    el.className = 'training-message';
+    return;
+  }
+  el.hidden = false;
+  el.className = `training-message ${kind}`;
+  el.innerHTML = html;
+}
+
+function renderTrainingTable() {
+  const host = $('#trainingTable');
+  if (!userData.length) {
+    host.innerHTML = `<div class="training-empty">还没有新增数据。<br>在上面的表单里填入高度、风速和实测漂移距离，再点“添加这条数据”。</div>`;
+    return;
+  }
+  const m = calibration.metrics || trainingMetrics();
+  const rows = m.rows.map(({ u, baseD, calD, residual }) => {
+    const quality = Math.abs(residual) <= 0.5 ? '接近' : (residual > 0 ? '偏低' : '偏高');
+    return `<tr>` +
+      `<td>${fmtHeight(u.h)}</td>` +
+      `<td>${fmt1(u.v)}</td>` +
+      `<td>${fmt1(u.d)}</td>` +
+      `<td class="col-base">${fmt1(baseD)}</td>` +
+      `<td>${fmt1(calD)}</td>` +
+      `<td>${signed2(residual)}（${quality}）</td>` +
+      `<td><button class="delete-btn" type="button" data-delete="${u.id}" aria-label="删除高度 ${fmtHeight(u.h)} 米、风速 ${fmt1(u.v)} 米每秒的样本">删除</button></td>` +
+      `</tr>`;
+  }).join('');
+  host.innerHTML = `<table class="training-table">` +
+    `<caption class="sr-only">已录入的实测数据及当前模型预测</caption>` +
+    `<thead><tr><th scope="col">高度 (m)</th><th scope="col">风速 (m/s)</th><th scope="col">实测 (m)</th>` +
+    `<th scope="col" class="col-base">原模型预测 (m)</th><th scope="col">校准后预测 (m)</th><th scope="col">残差 (m)</th><th scope="col">操作</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table>` +
+    `<p class="training-table-note">残差 = 实测 − 校准后预测；正数表示预测偏低。训练残差会偏小，判断效果请以左侧的留一误差为准。</p>`;
+  host.querySelectorAll('[data-delete]').forEach((btn) => {
+    btn.addEventListener('click', () => deleteTrainingSample(btn.dataset.delete));
+  });
+}
+
+function renderTrainingSummary() {
+  const host = $('#trainingSummary');
+  const n = userData.length;
+  if (!n) {
+    host.innerHTML = `<div class="training-empty">还没有新增数据。<br>加入数据后，这里会显示校准效果。</div>`;
+    return;
+  }
+  const p = calibratedPoint(state.h, state.v);
+  const rel = reliabilityInfo();
+  const m = calibration.metrics || trainingMetrics();
+  let looHtml;
+  if (m.looBase && m.looCal) {
+    const improved = m.looCal.rmse <= m.looBase.rmse + 1e-9;
+    looHtml = `新增样本留一误差：<strong>${fmt2(m.looCal.rmse)} m</strong>（原模型 ${fmt2(m.looBase.rmse)} m）` +
+      (improved
+        ? ' <span class="ok-text">✓ 有改善</span>'
+        : ' <span class="warn-text">! 没有改善</span><br>建议检查数据是否来自同一装置，或先删除可疑数据。');
+  } else {
+    looHtml = '新增样本少于 2 条，暂时无法做留一验证。建议至少加入 3 条不同条件的数据。';
+  }
+  const origHtml = (m.origBase && m.origCal)
+    ? `<details><summary>对原 25 个训练点的影响（参考）</summary>` +
+      `<p>原 25 点 RMSE：${fmt2(m.origBase.rmse)} m → <strong>${fmt2(m.origCal.rmse)} m</strong>。` +
+      `这 25 点来自另一套装置；如果你现在测的是不同装置，指标变差是正常的，说明模型正在适应当前装置。</p></details>`
+    : '';
+  const solid = `<div class="solidified-status">✓ 已自动固化到本机${lastSolidifiedAt ? ' · ' + fmtSavedTime(lastSolidifiedAt) : ''}</div>`;
+  host.innerHTML = solid + `<div class="training-stat-grid">` +
+    `<div class="train-stat"><span>新增数据</span><strong>${n} 条</strong></div>` +
+    `<div class="train-stat"><span>校准可信度</span><strong id="trainReliabilityLabel">${rel.label}</strong></div>` +
+    `<div class="train-stat"><span>当前条件修正</span><strong id="trainCurrentCorr">${signed2(p.corr)} m</strong></div>` +
+    `<div class="train-stat"><span>修正不确定度</span><strong id="trainCurrentSigma">±${fmt2(p.sigmaCorr)} m</strong></div>` +
+    `</div>` +
+    `<div class="reliability">` +
+    `<div class="reliability-head"><span>校准可信度</span><span id="trainReliabilityPct">${Math.round(rel.score * 100)}%</span></div>` +
+    `<div class="reliability-track"><div class="reliability-fill ${rel.cls}" id="trainReliabilityBar" style="width:${Math.round(rel.score * 100)}%"></div></div>` +
+    `</div>` +
+    `<div class="training-loo">${looHtml}${origHtml}</div>` +
+    `<details><summary>查看修正细节</summary>` +
+    `<p>整体偏移：${signed2(calibration.c[0])} m；高度趋势：每升高 10 m ${signed2(calibration.c[1])} m；` +
+    `风速趋势：每 +2 m/s ${signed2(calibration.c[2])} m。</p>` +
+    `<p>已自动固化到本机；下次打开会直接使用这个模型。</p>` +
+    `</details>`;
+}
+
+function updateTrainingCurrentValues() {
+  if (!userData.length) return;
+  const p = calibratedPoint(state.h, state.v);
+  const rel = reliabilityInfo();
+  const set = (sel, text) => { const el = $(sel); if (el) el.textContent = text; };
+  set('#trainCurrentCorr', `${signed2(p.corr)} m`);
+  set('#trainCurrentSigma', `±${fmt2(p.sigmaCorr)} m`);
+  set('#trainReliabilityLabel', rel.label);
+  set('#trainReliabilityPct', `${Math.round(rel.score * 100)}%`);
+  const bar = $('#trainReliabilityBar');
+  if (bar) {
+    bar.style.width = `${Math.round(rel.score * 100)}%`;
+    bar.className = `reliability-fill ${rel.cls}`;
+  }
+}
+
+function refreshTrainingAfterModelChange() {
+  recomputeCalibration();
+  solidifyModel();
+  renderTrainingTable();
+  renderTrainingSummary();
+  updateModelState();
+  updateUI();
+}
+
+function addTrainingSample(h, v, d) {
+  const dup = userData.some((u) =>
+    Math.abs(u.h - h) < 0.011 && Math.abs(u.v - v) < 0.011 && Math.abs(u.d - d) < 0.011);
+  if (dup) {
+    setTrainingMessage('这条数据已经存在，未重复添加。', 'warn');
+    return false;
+  }
+  const base = basePointAt(h, v);
+  const dev = d - base.d;
+  userData.push({ id: makeId(), h, v, d, created: new Date().toISOString() });
+  saveUserData();
+  refreshTrainingAfterModelChange();
+  let msg = `已加入 1 条数据，当前共 ${userData.length} 条；模型已重新校准。`;
+  if (Math.abs(dev) > 3 * Math.max(0.5, sigmaAt(h))) {
+    msg += ` 注意：这条数据比原模型${dev > 0 ? '高' : '低'} ${fmt1(Math.abs(dev))} m，偏差较大，模型会对它降权。`;
+    setTrainingMessage(msg, 'warn');
+  } else {
+    setTrainingMessage(msg, 'ok');
+  }
+  if (storageBlocked) {
+    setTrainingMessage(msg + ' 注意：浏览器不允许本地保存，关闭页面后数据会丢失。', 'warn');
+  }
+  return true;
+}
+
+function deleteTrainingSample(id) {
+  userData = userData.filter((u) => u.id !== id);
+  saveUserData();
+  refreshTrainingAfterModelChange();
+  setTrainingMessage('已删除这条数据，模型已重新校准。', 'ok');
+}
+
+function setTrainingMode(on, scroll = false) {
+  trainingMode = on;
+  saveTrainingMode(on);
+  const panel = $('#trainingPanel');
+  panel.hidden = !on;
+  const btn = $('#trainingToggle');
+  btn.classList.toggle('active', on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.setAttribute('aria-label', on ? '关闭训练模式' : '打开训练模式');
+  if (on) {
+    setTrainingDefaults();
+    renderTrainingTable();
+    renderTrainingSummary();
+    if (scroll) {
+      setTimeout(() => {
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        panel.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+      }, 60);
+    }
+  } else {
+    updateUI();
+  }
+}
+
+function exportTrainingCsv() {
+  if (!userData.length) {
+    setTrainingMessage('还没有可导出的数据。', 'warn');
+    return;
+  }
+  const m = calibration.metrics || trainingMetrics();
+  const lines = [['高度(m)', '风速(m/s)', '实测漂移(m)', '原模型预测(m)', '校准后预测(m)', '残差(m)', '记录时间'].join(',')];
+  for (const row of m.rows) {
+    lines.push([
+      fmtHeight(row.u.h), fmt1(row.u.v), fmt1(row.u.d),
+      fmt1(row.baseD), fmt1(row.calD), fmt1(row.residual), row.u.created
+    ].join(','));
+  }
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '漂移校准数据.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  setTrainingMessage('已导出 CSV。', 'ok');
+}
+
+function downloadSolidifiedModel() {
+  if (!userData.length) {
+    setTrainingMessage('还没有训练数据；当前是原始模型。', 'warn');
+    return;
+  }
+  const savedAt = lastSolidifiedAt || new Date().toISOString();
+  const model = buildSolidifiedModel(savedAt);
+  const blob = new Blob([JSON.stringify(model, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'drift_model_trained.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  setTrainingMessage('已下载固化模型；可用 python predict.py --model drift_model_trained.json 使用。', 'ok');
+}
+
+/* ---------- 更新界面 ---------- */
+let liveTimer = null;
+function announce(p, st) {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => {
+    $('#liveResult').textContent =
+      `释放高度 ${fmtHeight(state.h)} 米，风速 ${fmt1(state.v)} 米每秒，` +
+      `预计漂移 ${fmt1(p.d)} 米，95% 范围 ${fmt1(p.lo)} 到 ${fmt1(p.hi)} 米。${st.headline}`;
+  }, 400);
+}
+
+function updateUI() {
+  const p = calibratedPoint(state.h, state.v);
+  const st = statusFor(state.h, state.v);
+  updateModelState();
+
+  $('#driftValue').textContent = fmt1(p.d);
+  $('#driftInline').textContent = fmt1(p.d);
+  $('#rangeValue').textContent = `${fmt1(p.lo)} – ${fmt1(p.hi)} 米`;
+  $('#hangTime').textContent = `${fmt1(p.t)} 秒`;
+  $('#kValue').textContent = `${fmt2(p.k)} m`;
+  $('#bValue').textContent = `${fmt2(p.b)} m`;
+  $('#heightHint').textContent = floorHint(state.h);
+  $('#windHint').textContent = windHint(state.v);
+
+  const badge = $('#statusBadge');
+  badge.textContent = st.badge;
+  badge.className = `badge ${st.level}`;
+
+  const box = $('#statusBox');
+  box.className = `status-box status-${st.level}`;
+  box.innerHTML = `${st.level === 'good' ? ICONS.check : st.level === 'info' ? ICONS.info : ICONS.warn}` +
+    `<div><strong>${st.headline}</strong><br><span>${st.detail}</span></div>`;
+
+  const maxScale = niceCeil(Math.max(5, p.hi * 1.15));
+  $('#rangeFill').style.left = `${clamp((p.lo / maxScale) * 100, 0, 100)}%`;
+  $('#rangeFill').style.width = `${clamp(((p.hi - p.lo) / maxScale) * 100, 0, 100)}%`;
+  $('#rangeMarker').style.left = `${clamp((p.d / maxScale) * 100, 0, 100)}%`;
+  $('#rangeMax').textContent = `${fmtAxis(maxScale)} m`;
+
+  if (document.activeElement !== $('#heightNumber')) $('#heightNumber').value = fmtHeight(state.h);
+  if (document.activeElement !== $('#windNumber')) $('#windNumber').value = fmt1(state.v);
+
+  const calSuffix = userData.length ? ' · 已校准' : '';
+  $('#windChartSub').textContent = `当前高度 ${fmtHeight(state.h)} m${calSuffix}`;
+  $('#heightChartSub').textContent = `当前风速 ${fmt1(state.v)} m/s${calSuffix}`;
+
+  renderLanding(p);
+  renderWindChart(p);
+  renderHeightChart(p);
+  renderWindTable();
+  renderHeightTable();
+  if (trainingMode) updateTrainingCurrentValues();
+  announce(p, st);
+}
+
+let uiTimer = null;
+function schedule() {
+  if (uiTimer) return;
+  uiTimer = setTimeout(() => {
+    uiTimer = null;
+    updateUI();
+  }, 16);
+}
+function renderAll() { updateUI(); }
+
+/* ---------- 事件 ---------- */
+$('#heightNumber').addEventListener('input', (e) => {
+  const val = parseFloat(e.target.value);
+  if (!Number.isFinite(val) || val <= 0) return;
+  state.h = Math.max(H_FLOOR, val);
+  schedule();
+});
+$('#heightNumber').addEventListener('change', (e) => {
+  state.h = Math.max(H_FLOOR, numOr(e.target.value, state.h));
+  e.target.value = fmtHeight(state.h);
+  schedule();
+});
+$('#windNumber').addEventListener('input', (e) => {
+  const val = parseFloat(e.target.value);
+  if (!Number.isFinite(val) || val < 0) return;
+  state.v = Math.max(V_FLOOR, val);
+  schedule();
+});
+$('#windNumber').addEventListener('change', (e) => {
+  state.v = Math.max(V_FLOOR, numOr(e.target.value, state.v));
+  e.target.value = fmt1(state.v);
+  schedule();
+});
+
+$('#resetBtn').addEventListener('click', () => {
+  state.h = 10;
+  state.v = 2;
+  schedule();
+});
+
+/* ---------- 训练模式事件 ---------- */
+$('#trainingToggle').addEventListener('click', () => {
+  setTrainingMode(!trainingMode, true);
+});
+
+$('#trainingForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const h = parseFloat($('#trainHeight').value);
+  const v = parseFloat($('#trainWind').value);
+  const d = parseFloat($('#trainDrift').value);
+  if (!Number.isFinite(h) || !Number.isFinite(v) || !Number.isFinite(d)) {
+    setTrainingMessage('请把高度、风速、实测漂移距离都填成数字。', 'err');
+    return;
+  }
+  if (h < H_FLOOR || v < V_FLOOR) {
+    setTrainingMessage(`高度请填大于 0 的数（至少 ${H_FLOOR} m），风速请填不小于 0 的数。`, 'err');
+    return;
+  }
+  if (d < 0) {
+    setTrainingMessage('实测漂移距离请填不小于 0 的数。', 'err');
+    return;
+  }
+  if (addTrainingSample(h, v, d)) {
+    $('#trainDrift').value = '';
+    $('#trainDrift').focus();
+  }
+});
+
+$('#fillCurrentBtn').addEventListener('click', () => {
+  $('#trainHeight').value = fmtHeight(state.h);
+  $('#trainWind').value = fmt1(state.v);
+  $('#trainDrift').focus();
+  setTrainingMessage('已填入当前高度和风速，请补上实测漂移距离。', 'ok');
+});
+
+$('#resetTrainingBtn').addEventListener('click', () => {
+  if (!userData.length) {
+    setTrainingMessage('当前没有新增数据，已经是原始模型。', 'warn');
+    return;
+  }
+  if (!window.confirm('确定要删除所有新增数据并恢复原始模型吗？此操作不可撤销。')) return;
+  userData = [];
+  saveUserData();
+  refreshTrainingAfterModelChange();
+  setTrainingMessage('已恢复原始模型。', 'ok');
+});
+
+$('#exportTrainingBtn').addEventListener('click', exportTrainingCsv);
+$('#downloadModelBtn').addEventListener('click', downloadSolidifiedModel);
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(schedule, 120);
+});
+
+/* ---------- 初始渲染 ---------- */
+$('#metaR2').textContent = Number(META.loocv_r2).toFixed(3);
+$('#metaRmse').textContent = `${Number(META.loocv_rmse).toFixed(2)} m`;
+$('#metaCoverage').textContent = `${Math.round(Number(META.coverage) * 100)}%`;
+
+$('#trainingPanel').hidden = !trainingMode;
+$('#trainingToggle').classList.toggle('active', trainingMode);
+$('#trainingToggle').setAttribute('aria-pressed', trainingMode ? 'true' : 'false');
+$('#trainingToggle').setAttribute('aria-label', trainingMode ? '关闭训练模式' : '打开训练模式');
+recomputeCalibration();
+if (!userData.length) {
+  lastSolidifiedAt = null;
+  try { localStorage.removeItem(CAL_SNAPSHOT_KEY); } catch (e) { /* ignore */ }
+} else if (!lastSolidifiedAt) {
+  solidifyModel();
+}
+renderTrainingTable();
+renderTrainingSummary();
+updateModelState();
+if (trainingMode) {
+  setTrainingDefaults();
+  if (storageBlocked) setTrainingMessage('浏览器不允许本地保存；本次录入的数据在关闭页面后会丢失。', 'warn');
+}
+updateUI();
+</script>
+</body>
+</html>

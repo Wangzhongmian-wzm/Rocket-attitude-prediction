@@ -1,0 +1,19 @@
+# 大文件 / 原始视频（GitHub 单文件限制 100 MB）
+*.mp4
+
+# 网页训练模式下载的本地固化模型
+drift_model_trained.json
+
+# Python / 临时调试文件
+__pycache__/
+.chrome-*/
+debug_*
+web_*.png
+dom_*.html
+chrome_err*.txt
+test_trained.json
+*.log
+
+# 操作系统
+Thumbs.db
+.DS_Store
